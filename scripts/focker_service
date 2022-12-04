@@ -1,0 +1,83 @@
+#!/bin/sh
+
+# PROVIDE: focker_service
+# REQUIRE: sshd
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="focker_service"
+desc="Focker jails service"
+rcvar="focker_service_enable"
+start_cmd="${name}_start"
+stop_cmd="${name}_stop"
+
+load_rc_config $name
+
+export HOME=/root
+export PYTHONPATH=/home/sadaszew/workspace/focker
+
+_helper() {
+  STARTING=$1
+  STARTED=$2
+  START=$3
+  START_L=$4
+  SWITCH=$5
+
+  /usr/local/bin/python3 <<EOF
+from focker.misc import load_jailconf
+from focker.jailconf import JailConf, \
+  JailBlock
+from asyncio.subprocess import DEVNULL, PIPE
+import asyncio
+import multiprocessing as mp
+import tempfile
+import os
+
+async def task(name, entry):
+  print(f'${STARTING} {name} ({entry.get("host.hostname")}) ... ')
+  try:
+    blk = JailBlock.create(name, entry)
+    jc = JailConf()
+    jc[name] = blk
+    cmd = [ 'jail', '-f', '-', '${SWITCH}', name ]
+    proc = await asyncio.create_subprocess_exec(cmd[0], *cmd[1:], stdout=DEVNULL, stderr=DEVNULL, stdin=PIPE)
+    await proc.communicate(input=str(jc).encode('utf-8'))
+    print(f'${STARTED}: {name} ({entry.get("host.hostname")})')
+  except Exception as e:
+    print(f'${START} failed: {name} ({entry.get("host.hostname")}) - {e}')
+
+conf = load_jailconf()
+queue = [ (name, entry) for name, entry in conf.items() ]
+
+n_cpu = mp.cpu_count()
+loop = asyncio.get_event_loop()
+print(f'${STARTING} Focker jails in parallel ({n_cpu}) ...')
+
+while True:
+  q = len(queue)
+  n = len(asyncio.all_tasks(loop))
+  if q == 0 and n == 0:
+    break
+  if n < n_cpu:
+    end = min(q, n_cpu - n)
+    batch = queue[:end]
+    queue = queue[end:]
+    for name, entry in batch:
+      loop.create_task(task(name, entry))
+  loop.run_until_complete(asyncio.sleep(0.2))
+
+print('Focker jails ${START_L} complete.')
+
+EOF
+}
+
+focker_service_start() {
+  _helper Starting Started Start start -c
+}
+
+focker_service_stop() {
+  _helper Stopping Stopped Stop stop -r
+}
+
+run_rc_command "$1"
