@@ -62,6 +62,25 @@ bsdinstall config  || error "Failed to save config"
 cp /etc/resolv.conf $1/etc
 cp /etc/localtime $1/etc
 
+clone_repo() {
+  # Set the repository URL and target directory
+  REPO_URL="https://github.com/hardenedbsd/ports.git"
+  TARGET_DIR="/usr/ports/."
+
+  git clone "$REPO_URL" "$TARGET_DIR"
+}
+
+DIRECTORY="/usr/ports"
+ls "$DIRECTORY"
+
+if [ $? -ne 0 ]; then
+  echo "Failed to mount the ports directory. Cloning 'hardenedbsd/ports' now"
+  clone_repo
+else
+  mount -t nullfs /usr/ports /jail/path/usr/ports
+fi
+
+
 bsdinstall entropy
 
 echo "Installation Completed at" "$(date)"
